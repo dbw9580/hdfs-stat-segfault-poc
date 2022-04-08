@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-#include "include/hdfs.h" 
+#include "hdfs.h" 
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -63,7 +63,8 @@ int main(int argc, char **argv) {
     curSize = bufferSize;
     for (; curSize == bufferSize;) {
         curSize = hdfsRead(fs, readFile, (void*)buffer, curSize);
-	printf("%s", buffer);
+        buffer[curSize] = '\0';
+	    printf("%s", buffer);
     }
     printf("\n");
 
