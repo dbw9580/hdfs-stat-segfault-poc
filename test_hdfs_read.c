@@ -18,6 +18,7 @@
 
 #include "hdfs.h" 
 
+#include <jni.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,6 +28,7 @@ void get_stats(hdfsFile file);
 int main(int argc, char **argv) {
     hdfsFS fs;
     const char *rfile = argv[1];
+    tSize fileSize = strtoul(argv[2], NULL, 10);
     tSize bufferSize = strtoul(argv[3], NULL, 10);
     hdfsFile readFile;
     char* buffer;
@@ -60,36 +62,95 @@ int main(int argc, char **argv) {
     memset(buffer, 0, bufferSize + 1);
     
     // read from the file
-    curSize = bufferSize;
-    for (; curSize == bufferSize;) {
-        curSize = hdfsRead(fs, readFile, (void*)buffer, curSize);
+    curSize = 0;
+    int bytesRead = 0;
+    for (; bytesRead < fileSize; bytesRead += curSize) {
+        curSize = hdfsRead(fs, readFile, (void*)buffer, bufferSize);
+        if (curSize < 0) {
+            break;
+        }
         buffer[curSize] = '\0';
 	    printf("%s", buffer);
     }
     printf("\n");
 
-    //get_stats(readFile);
+    get_stats(readFile);
     
 
     free(buffer);
     hdfsCloseFile(fs, readFile);
     hdfsDisconnect(fs);
 
+    printf("bye\n");
     return 0;
+}
+
+
+int do_gc() {
+  JavaVM *vmBuf[1] = { NULL };
+  jsize vmNum;
+  JNI_GetCreatedJavaVMs(vmBuf, 1, &vmNum);
+  if (vmNum < 1) {
+    fprintf(stderr, "No JVM has been created\n");
+    return -1;
+  }
+
+  JavaVM *vm = vmBuf[0];
+  JNIEnv *env = NULL;
+  JavaVMAttachArgs args = {
+    .version = JNI_VERSION_1_8,
+    .name = NULL,
+    .group = NULL
+  };
+  (*vm)->AttachCurrentThread(vm, (void **) &env, &args); 
+  if (env == NULL) {
+    fprintf(stderr, "JNIEnv is null\n");
+    return -1;
+  }
+
+  jclass    systemClass    = NULL;
+  jmethodID systemGCMethod = NULL;
+  jthrowable jthr = NULL;
+  systemClass    = (*env)->FindClass(env, "java/lang/System");
+  jthr = (*env)->ExceptionOccurred(env);
+  if (jthr != NULL) {
+    fprintf(stderr, "cannot locate java.lang.System\n");
+    return -1;
+  }
+
+  systemGCMethod = (*env)->GetStaticMethodID(env, systemClass, "gc", "()V");
+  jthr = (*env)->ExceptionOccurred(env);
+  if (jthr != NULL) {
+    fprintf(stderr, "cannot find method System.gc()\n");
+    return -1;
+  }
+
+  (*env)->CallStaticVoidMethod(env, systemClass, systemGCMethod);
+  jthr = (*env)->ExceptionOccurred(env);
+  if (jthr != NULL) {
+    fprintf(stderr, "System.gc() failed\n");
+    return -1;
+  }
+
+  printf("System.gc() finished\n");
+  return 0;
 }
 
 void get_stats(hdfsFile hdfs_file) {
   struct hdfsReadStatistics* stats;
+  do_gc();
   int success = hdfsFileGetReadStatistics(hdfs_file, &stats);
+
+  do_gc();
   if (success == 0) {
      printf("totalBytesRead=%d ", stats->totalBytesRead);
      printf("totalLocalBytesRead=%d ", stats->totalLocalBytesRead);
      printf("totalShortCircuitBytesRead=%d ", stats->totalShortCircuitBytesRead);
      printf("totalZeroCopyBytesRead=%d\n", stats->totalZeroCopyBytesRead);
+     hdfsFileFreeReadStatistics(stats);
   } else {
      fprintf(stderr, "failed to get stats\n");
   }
-  hdfsFileFreeReadStatistics(stats);
   hdfsFileClearReadStatistics(hdfs_file);
 }
 
